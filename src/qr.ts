@@ -76,37 +76,6 @@ const getBestVersion = (data: Uint8Array, ec: ECLevel): number => {
   throw new RangeError('Bytes exceed max length');
 };
 
-/** Interleaves data from DC blocks then data from EC blocks */
-const interleave = (
-  byteLength: number,
-  dcs: Uint8Array[],
-  ecs: Uint8Array[]
-): Uint8Array => {
-  //let byteLength = 0;
-  let maxY = 0;
-  // Get the maximum of length of DC blocks and add up byte length
-  for (let i = 0; i < dcs.length; i++) {
-    maxY = maxY < dcs[i].byteLength ? dcs[i].byteLength : maxY;
-  }
-  // Add bytes from DCs, alternating blocks each time
-  const buffer = new Uint8Array(byteLength);
-  let idx = 0;
-  for (let y = 0; y < maxY; y++) {
-    for (let x = 0; x < dcs.length; x++) {
-      if (y < dcs[x].byteLength) {
-        buffer[idx++] = dcs[x][y];
-      }
-    }
-  }
-  // Add bytes from ECs, alternating blocks each time
-  for (let y = 0, maxY = ecs[0].byteLength; y < maxY; y++) {
-    for (let x = 0; x < ecs.length; x++) {
-      buffer[idx++] = ecs[x][y];
-    }
-  }
-  return buffer;
-};
-
 /** Encode segments output data into interleaved QR data with EC */
 const encodeData = (segments: Uint8Array, version: number, ec: ECLevel) => {
   const byteLength = segments.byteLength + ecSizeByVersion[version][ec];
@@ -114,16 +83,27 @@ const encodeData = (segments: Uint8Array, version: number, ec: ECLevel) => {
   const splitIdx = numBlocks - (byteLength % numBlocks);
   const blockLength = (segments.byteLength / numBlocks) | 0;
   const ecCount = ((byteLength / numBlocks) | 0) - blockLength;
-  // We assemble EC blocks for each DC block
-  const dcs: Uint8Array[] = new Array(numBlocks);
-  const ecs: Uint8Array[] = new Array(numBlocks);
-  for (let idx = 0, offset = 0; idx < numBlocks; idx++) {
-    const dataSize = idx < splitIdx ? blockLength : blockLength + 1;
-    const dc = (dcs[idx] = segments.subarray(offset, (offset += dataSize)));
-    ecs[idx] = encodeRS(dc, ecCount);
+  const ecStart = segments.byteLength;
+  // Interleave bytes of all data blocks
+  const data = new Uint8Array(byteLength);
+  for (let blockIdx = 0, ptr = 0; blockIdx < numBlocks; blockIdx++) {
+    const dataSize = blockIdx < splitIdx ? blockLength : blockLength + 1;
+    const ecBytes = encodeRS(segments.subarray(ptr, ptr + dataSize), ecCount);
+    // Interleave bytes from each DC block
+    for (let byteIdx = 0; byteIdx < dataSize; byteIdx++) {
+      const bufIdx =
+        byteIdx < blockLength
+          ? byteIdx * numBlocks + blockIdx
+          : blockLength * numBlocks + (blockIdx - splitIdx);
+      data[bufIdx] = segments[ptr + byteIdx];
+    }
+    // Then; interleave bytes from each computed EC block
+    for (let byteIdx = 0; byteIdx < ecCount; byteIdx++) {
+      data[ecStart + byteIdx * numBlocks + blockIdx] = ecBytes[byteIdx];
+    }
+    ptr += dataSize;
   }
-  // Interleave the DCs and then the ECs
-  return interleave(byteLength, dcs, ecs);
+  return data;
 };
 
 /** Draw plain square */
