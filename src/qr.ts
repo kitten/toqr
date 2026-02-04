@@ -475,22 +475,24 @@ const applyBestPattern = (
 ): MaskPattern => {
   let minPenalty = 0;
   let bestPattern: MaskPattern = 0;
+  // Apply the patterns to a copy that's reset each time
+  // NOTE: This is more performant than undoing the XOR
+  const copy = new Uint8Array(pixels.byteLength);
   for (
     let pattern: MaskPattern = 0;
     pattern <= 7;
     pattern = (pattern + 1) as MaskPattern
   ) {
-    xorPattern(pixels, reserved, extent, pattern);
-    const penalty = computePenalty(pixels, extent);
+    copy.set(pixels);
+    xorPattern(copy, reserved, extent, pattern);
+    // Pick the pattern with the lowest penalty
+    const penalty = computePenalty(copy, extent);
     if (pattern === 0 || penalty < minPenalty) {
       minPenalty = penalty;
       bestPattern = pattern;
     }
-    // Micro-opt: We can skip a triple-XOR if the final pattern is the best
-    if (pattern === 7 && bestPattern === 7) return 7;
-    // Undo the pattern by applying XOR again
-    xorPattern(pixels, reserved, extent, pattern);
   }
+  // Apply the best pattern to the actual pixel buffer
   xorPattern(pixels, reserved, extent, bestPattern);
   return bestPattern;
 };
