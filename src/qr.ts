@@ -276,39 +276,78 @@ const xorPattern = (
   extent: number,
   pattern: MaskPattern
 ) => {
-  for (let row = 0; row < extent; row++) {
-    for (let col = 0; col < extent; col++) {
-      if (!reserved[row * extent + col]) {
-        let bit: boolean;
-        switch (pattern) {
-          case 0:
-            bit = (row + col) % 2 === 0;
-            break;
-          case 1:
-            bit = row % 2 === 0;
-            break;
-          case 2:
-            bit = col % 3 === 0;
-            break;
-          case 3:
-            bit = (row + col) % 3 === 0;
-            break;
-          case 4:
-            bit = (((row / 2) | 0) + ((col / 3) | 0)) % 2 === 0;
-            break;
-          case 5:
-            bit = ((row * col) % 2) + ((row * col) % 3) === 0;
-            break;
-          case 6:
-            bit = (((row * col) % 2) + ((row * col) % 3)) % 2 === 0;
-            break;
-          case 7:
-            bit = (((row * col) % 3) + ((row + col) % 2)) % 2 === 0;
-            break;
+  switch (pattern) {
+    case 0:
+      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+        for (let col = 0; col < extent; col++) {
+          const idx = rowBase + col;
+          if (!reserved[idx] && ((row + col) & 1) === 0) pixels[idx] ^= 1;
         }
-        pixels[row * extent + col] ^= bit ? 1 : 0;
       }
-    }
+      break;
+    case 1:
+      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+        for (let col = 0; col < extent; col++) {
+          const idx = rowBase + col;
+          if (!reserved[idx] && (row & 1) === 0) pixels[idx] ^= 1;
+        }
+      }
+      break;
+    case 2:
+      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+        for (let col = 0; col < extent; col++) {
+          const idx = rowBase + col;
+          if (!reserved[idx] && col % 3 === 0) pixels[idx] ^= 1;
+        }
+      }
+      break;
+    case 3:
+      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+        for (let col = 0; col < extent; col++) {
+          const idx = rowBase + col;
+          if (!reserved[idx] && (row + col) % 3 === 0) pixels[idx] ^= 1;
+        }
+      }
+      break;
+    case 4:
+      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+        const rowHalf = (row / 2) | 0;
+        for (let col = 0; col < extent; col++) {
+          const idx = rowBase + col;
+          if (!reserved[idx] && ((rowHalf + ((col / 3) | 0)) & 1) === 0)
+            pixels[idx] ^= 1;
+        }
+      }
+      break;
+    case 5:
+      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+        for (let col = 0; col < extent; col++) {
+          const idx = rowBase + col;
+          const rc = row * col;
+          if (!reserved[idx] && (rc & 1) + (rc % 3) === 0) pixels[idx] ^= 1;
+        }
+      }
+      break;
+    case 6:
+      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+        for (let col = 0; col < extent; col++) {
+          const idx = rowBase + col;
+          const rc = row * col;
+          if (!reserved[idx] && ((rc & 1) + (rc % 3)) % 2 === 0)
+            pixels[idx] ^= 1;
+        }
+      }
+      break;
+    case 7:
+      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+        for (let col = 0; col < extent; col++) {
+          const idx = rowBase + col;
+          const rc = row * col;
+          if (!reserved[idx] && (((rc % 3) + ((row + col) & 1)) & 1) === 0)
+            pixels[idx] ^= 1;
+        }
+      }
+      break;
   }
 };
 
