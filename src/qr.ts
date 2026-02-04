@@ -110,14 +110,13 @@ const encodeData = (segments: Uint8Array, version: number, ec: ECLevel) => {
 const setSquare = (
   pixels: Uint8Array,
   extent: number,
-  row: number,
-  col: number,
+  fromRow: number,
+  fromCol: number,
   size: number
 ) => {
-  for (let i = 0; i < size; i++) {
-    for (let j = 0; j < size; j++) {
-      pixels[(row + i) * extent + (col + j)] = 1;
-    }
+  const end = (fromRow + size) * extent;
+  for (let offset = fromRow * extent; offset < end; offset += extent) {
+    pixels.fill(1, offset + fromCol, offset + fromCol + size);
   }
 };
 
