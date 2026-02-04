@@ -1,6 +1,6 @@
 {
   "name": "toqr",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tiny QR code encoder",
   "author": "Phil Pluckthun <phil@kitten.sh>",
   "source": "./src/index.ts",
