@@ -312,80 +312,66 @@ const xorPattern = (
   }
 };
 
-/** Penalty for 5 adjacent consecutive bits */
-const computePenaltyN1 = (pixels: Uint8Array, extent: number): number => {
-  const PENALTY_WEIGHT_N1 = 3;
+/** Compute all penalty scores in a single pass */
+const computePenalty = (pixels: Uint8Array, extent: number): number => {
+  const PENALTY_N1 = 3; // N1: Penalises consecutive bits
+  const PENALTY_N2 = 3; // N2: Penalises 2x2 squares
+  const PENALTY_N3 = 40; // N3: Penalises finder patterns
+  const PENALTY_N4 = 10; // N4: Penalises high ratio of dark blotches
   let penalty = 0;
-  for (let row = 0; row < extent; row++) {
-    let rowNumSame = 1;
-    let colNumSame = 1;
-    for (let col = 1; col < extent; col++) {
-      if (pixels[row * extent + col - 1] === pixels[row * extent + col]) {
-        rowNumSame++;
-      } else {
-        if (rowNumSame >= 5) penalty += PENALTY_WEIGHT_N1 + (rowNumSame - 5);
-        rowNumSame = 1;
-      }
-      if (pixels[(col - 1) * extent + row] === pixels[col * extent + row]) {
-        colNumSame++;
-      } else {
-        if (colNumSame >= 5) penalty += PENALTY_WEIGHT_N1 + (colNumSame - 5);
-        colNumSame = 1;
-      }
-    }
-    if (rowNumSame >= 5) penalty += PENALTY_WEIGHT_N1 + (rowNumSame - 5);
-    if (colNumSame >= 5) penalty += PENALTY_WEIGHT_N1 + (colNumSame - 5);
-  }
-  return penalty;
-};
-
-/** Penalty for amount of 2x2 squares */
-const computePenaltyN2 = (pixels: Uint8Array, extent: number): number => {
-  const PENALTY_WEIGHT_N2 = 3;
-  let penalty = 0;
-  for (let row = 0; row < extent - 1; row++) {
-    for (let col = 0; col < extent - 1; col++) {
-      if (
-        pixels[row * extent + col] === pixels[row * extent + col + 1] &&
-        pixels[row * extent + col] === pixels[(row + 1) * extent + col] &&
-        pixels[row * extent + col] === pixels[(row + 1) * extent + col + 1]
-      ) {
-        penalty += PENALTY_WEIGHT_N2;
-      }
-    }
-  }
-  return penalty;
-};
-
-/** Penalty for finder-like patterns (0b000010001 / 0b100010000) */
-const computePenaltyN3 = (pixels: Uint8Array, extent: number): number => {
-  const PENALTY_WEIGHT_N3 = 40;
-  let penalty = 0;
-  for (let i = 0; i < extent; i++) {
-    let row = 0;
-    let col = 0;
-    for (let j = 0; j < extent; j++) {
-      row = ((row << 1) & 0x7ff) | pixels[i * extent + j];
-      if (j >= 10 && (row === 0x5d0 || row === 0x05d))
-        penalty += PENALTY_WEIGHT_N3;
-      col = ((col << 1) & 0x7ff) | pixels[j * extent + i];
-      if (j >= 10 && (col === 0x5d0 || col === 0x05d))
-        penalty += PENALTY_WEIGHT_N3;
-    }
-  }
-  return penalty;
-};
-
-/** Penalty if ratio of unset bits is too high */
-const computePenaltyN4 = (pixels: Uint8Array, extent: number): number => {
-  const PENALTY_WEIGHT_N4 = 10;
   let darkBits = 0;
-  for (let row = 0; row < extent; row++)
-    for (let col = 0; col < extent; col++)
-      darkBits += pixels[row * extent + col] & 1;
+  for (let i = 0; i < extent; i++) {
+    let rowNumSame = 1; // N1: consecutive rows
+    let colNumSame = 1; // N1: consecutive cols
+    let rowWindow = 0; // N3: sliding window for row finder patterns
+    let colWindow = 0; // N3: sliding window for col finder patterns
+    for (let j = 0; j < extent; j++) {
+      const rowIdx = i * extent + j; // row pixel at (i, j)
+      const colIdx = j * extent + i; // row pixel at (j, i)
+      darkBits += pixels[rowIdx];
+      // N1: After first pixels, keep track of consecutive pixels
+      if (j > 0) {
+        // N1: Check row for consecutive pixels
+        if (pixels[rowIdx - 1] === pixels[rowIdx]) {
+          rowNumSame++;
+        } else {
+          if (rowNumSame >= 5) penalty += PENALTY_N1 + (rowNumSame - 5);
+          rowNumSame = 1;
+        }
+        // N1: Check column for consecutive pixels
+        if (pixels[colIdx - extent] === pixels[colIdx]) {
+          colNumSame++;
+        } else {
+          if (colNumSame >= 5) penalty += PENALTY_N1 + (colNumSame - 5);
+          colNumSame = 1;
+        }
+      }
+      // N2: check for 2x2 square
+      if (
+        i < extent - 1 &&
+        j < extent - 1 &&
+        pixels[rowIdx] === pixels[rowIdx + 1] &&
+        pixels[rowIdx] === pixels[rowIdx + extent] &&
+        pixels[rowIdx] === pixels[rowIdx + extent + 1]
+      )
+        penalty += PENALTY_N2;
+      // N3: update sliding windows, and check for finder patterns
+      rowWindow = ((rowWindow << 1) & 0x7ff) | pixels[rowIdx];
+      colWindow = ((colWindow << 1) & 0x7ff) | pixels[colIdx];
+      if (j >= 10) {
+        if (rowWindow === 0x5d0 || rowWindow === 0x05d) penalty += PENALTY_N3;
+        if (colWindow === 0x5d0 || colWindow === 0x05d) penalty += PENALTY_N3;
+      }
+    }
+    // N1: At the end of row/column run, check for consecutive pixels again
+    if (rowNumSame >= 5) penalty += PENALTY_N1 + (rowNumSame - 5);
+    if (colNumSame >= 5) penalty += PENALTY_N1 + (colNumSame - 5);
+  }
+  // N4: after counting all dark bits, compute penalty from dark/light ratio
   const fraction = darkBits / pixels.byteLength;
   const increment = Math.abs(fraction - 0.5) * 100;
-  return PENALTY_WEIGHT_N4 * Math.floor(increment / 5);
+  penalty += PENALTY_N4 * Math.floor(increment / 5);
+  return penalty;
 };
 
 const applyBestPattern = (
@@ -401,11 +387,7 @@ const applyBestPattern = (
     pattern = (pattern + 1) as MaskPattern
   ) {
     xorPattern(pixels, reserved, extent, pattern);
-    const penalty =
-      computePenaltyN1(pixels, extent) +
-      computePenaltyN2(pixels, extent) +
-      computePenaltyN3(pixels, extent) +
-      computePenaltyN4(pixels, extent);
+    const penalty = computePenalty(pixels, extent);
     if (pattern === 0 || penalty < minPenalty) {
       minPenalty = penalty;
       bestPattern = pattern;
@@ -530,10 +512,7 @@ export {
   reserveVersionInfo as _reserveVersionInfo,
   writeData as _writeData,
   xorPattern as _xorPattern,
-  computePenaltyN1 as _computePenaltyN1,
-  computePenaltyN2 as _computePenaltyN2,
-  computePenaltyN3 as _computePenaltyN3,
-  computePenaltyN4 as _computePenaltyN4,
+  computePenalty as _computePenalty,
   applyBestPattern as _applyBestPattern,
   encodeFormatInfo as _encodeFormatInfo,
   writeFormatInfo as _writeFormatInfo,
