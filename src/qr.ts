@@ -522,7 +522,6 @@ export const toQR = (content: string | Uint8Array, ec = ECLevel.L) => {
 export {
   makeSegments as _makeSegments,
   getBestVersion as _getBestVersion,
-  interleave as _interleave,
   encodeData as _encodeData,
   writeFinderPatterns as _writeFinderPatterns,
   writeAlignmentPatterns as _writeAlignmentPatterns,

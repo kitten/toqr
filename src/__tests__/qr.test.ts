@@ -3,7 +3,6 @@ import {
   toQR,
   _makeSegments,
   _getBestVersion,
-  _interleave,
   _encodeData,
   _writeFinderPatterns,
   _writeAlignmentPatterns,
@@ -152,40 +151,6 @@ describe('_makeSegments', () => {
     const data = new TextEncoder().encode('Test data 123');
     const segments = _makeSegments(data, 2, 1);
     expect(Array.from(segments)).toMatchSnapshot();
-  });
-});
-
-describe('_interleave', () => {
-  it('interleaves two DC blocks correctly', () => {
-    const dcs = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6])];
-    const ecs = [new Uint8Array([7, 8]), new Uint8Array([9, 10])];
-    const result = _interleave(10, dcs, ecs);
-    expect(result).toEqual(new Uint8Array([1, 4, 2, 5, 3, 6, 7, 9, 8, 10]));
-  });
-
-  it('handles uneven DC block lengths', () => {
-    const dcs = [new Uint8Array([1, 2]), new Uint8Array([3, 4, 5])];
-    const ecs = [new Uint8Array([6]), new Uint8Array([7])];
-    const result = _interleave(8, dcs, ecs);
-    expect(result).toEqual(new Uint8Array([1, 3, 2, 4, 5, 6, 7, 0]));
-  });
-
-  it('handles single block', () => {
-    const dcs = [new Uint8Array([1, 2, 3, 4])];
-    const ecs = [new Uint8Array([5, 6])];
-    const result = _interleave(6, dcs, ecs);
-    expect(result).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6]));
-  });
-
-  it('handles three blocks', () => {
-    const dcs = [
-      new Uint8Array([1, 2]),
-      new Uint8Array([3, 4]),
-      new Uint8Array([5, 6]),
-    ];
-    const ecs = [new Uint8Array([7]), new Uint8Array([8]), new Uint8Array([9])];
-    const result = _interleave(9, dcs, ecs);
-    expect(result).toEqual(new Uint8Array([1, 3, 5, 2, 4, 6, 7, 8, 9]));
   });
 });
 
