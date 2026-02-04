@@ -269,85 +269,140 @@ const writeData = (
   }
 };
 
+const xorPatternN0 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      if (!reserved[idx] && ((row + col) & 1) === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN1 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      if (!reserved[idx] && (row & 1) === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN2 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      if (!reserved[idx] && col % 3 === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN3 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      if (!reserved[idx] && (row + col) % 3 === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN4 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    const rowHalf = (row / 2) | 0;
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      if (!reserved[idx] && ((rowHalf + ((col / 3) | 0)) & 1) === 0)
+        pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN5 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      const rc = row * col;
+      if (!reserved[idx] && (rc & 1) + (rc % 3) === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN6 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      const rc = row * col;
+      if (!reserved[idx] && ((rc & 1) + (rc % 3)) % 2 === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN7 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      const rc = row * col;
+      if (!reserved[idx] && (((rc % 3) + ((row + col) & 1)) & 1) === 0)
+        pixels[idx] ^= 1;
+    }
+  }
+};
+
 /** XOR the mask pattern onto the pixels on unreserved bits */
 const xorPattern = (
   pixels: Uint8Array,
   reserved: Uint8Array,
   extent: number,
   pattern: MaskPattern
-) => {
+): void => {
   switch (pattern) {
     case 0:
-      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
-        for (let col = 0; col < extent; col++) {
-          const idx = rowBase + col;
-          if (!reserved[idx] && ((row + col) & 1) === 0) pixels[idx] ^= 1;
-        }
-      }
-      break;
+      return xorPatternN0(pixels, reserved, extent);
     case 1:
-      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
-        for (let col = 0; col < extent; col++) {
-          const idx = rowBase + col;
-          if (!reserved[idx] && (row & 1) === 0) pixels[idx] ^= 1;
-        }
-      }
-      break;
+      return xorPatternN1(pixels, reserved, extent);
     case 2:
-      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
-        for (let col = 0; col < extent; col++) {
-          const idx = rowBase + col;
-          if (!reserved[idx] && col % 3 === 0) pixels[idx] ^= 1;
-        }
-      }
-      break;
+      return xorPatternN2(pixels, reserved, extent);
     case 3:
-      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
-        for (let col = 0; col < extent; col++) {
-          const idx = rowBase + col;
-          if (!reserved[idx] && (row + col) % 3 === 0) pixels[idx] ^= 1;
-        }
-      }
-      break;
+      return xorPatternN3(pixels, reserved, extent);
     case 4:
-      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
-        const rowHalf = (row / 2) | 0;
-        for (let col = 0; col < extent; col++) {
-          const idx = rowBase + col;
-          if (!reserved[idx] && ((rowHalf + ((col / 3) | 0)) & 1) === 0)
-            pixels[idx] ^= 1;
-        }
-      }
-      break;
+      return xorPatternN4(pixels, reserved, extent);
     case 5:
-      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
-        for (let col = 0; col < extent; col++) {
-          const idx = rowBase + col;
-          const rc = row * col;
-          if (!reserved[idx] && (rc & 1) + (rc % 3) === 0) pixels[idx] ^= 1;
-        }
-      }
-      break;
+      return xorPatternN5(pixels, reserved, extent);
     case 6:
-      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
-        for (let col = 0; col < extent; col++) {
-          const idx = rowBase + col;
-          const rc = row * col;
-          if (!reserved[idx] && ((rc & 1) + (rc % 3)) % 2 === 0)
-            pixels[idx] ^= 1;
-        }
-      }
-      break;
+      return xorPatternN6(pixels, reserved, extent);
     case 7:
-      for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
-        for (let col = 0; col < extent; col++) {
-          const idx = rowBase + col;
-          const rc = row * col;
-          if (!reserved[idx] && (((rc % 3) + ((row + col) & 1)) & 1) === 0)
-            pixels[idx] ^= 1;
-        }
-      }
-      break;
+      return xorPatternN7(pixels, reserved, extent);
   }
 };
 
