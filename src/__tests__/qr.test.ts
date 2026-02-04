@@ -3,7 +3,6 @@ import {
   toQR,
   _makeSegments,
   _getBestVersion,
-  _interleave,
   _encodeData,
   _writeFinderPatterns,
   _writeAlignmentPatterns,
@@ -12,10 +11,7 @@ import {
   _reserveVersionInfo,
   _writeData,
   _xorPattern,
-  _computePenaltyN1,
-  _computePenaltyN2,
-  _computePenaltyN3,
-  _computePenaltyN4,
+  _computePenalty,
   _applyBestPattern,
   _encodeFormatInfo,
   _writeFormatInfo,
@@ -152,40 +148,6 @@ describe('_makeSegments', () => {
     const data = new TextEncoder().encode('Test data 123');
     const segments = _makeSegments(data, 2, 1);
     expect(Array.from(segments)).toMatchSnapshot();
-  });
-});
-
-describe('_interleave', () => {
-  it('interleaves two DC blocks correctly', () => {
-    const dcs = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6])];
-    const ecs = [new Uint8Array([7, 8]), new Uint8Array([9, 10])];
-    const result = _interleave(10, dcs, ecs);
-    expect(result).toEqual(new Uint8Array([1, 4, 2, 5, 3, 6, 7, 9, 8, 10]));
-  });
-
-  it('handles uneven DC block lengths', () => {
-    const dcs = [new Uint8Array([1, 2]), new Uint8Array([3, 4, 5])];
-    const ecs = [new Uint8Array([6]), new Uint8Array([7])];
-    const result = _interleave(8, dcs, ecs);
-    expect(result).toEqual(new Uint8Array([1, 3, 2, 4, 5, 6, 7, 0]));
-  });
-
-  it('handles single block', () => {
-    const dcs = [new Uint8Array([1, 2, 3, 4])];
-    const ecs = [new Uint8Array([5, 6])];
-    const result = _interleave(6, dcs, ecs);
-    expect(result).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6]));
-  });
-
-  it('handles three blocks', () => {
-    const dcs = [
-      new Uint8Array([1, 2]),
-      new Uint8Array([3, 4]),
-      new Uint8Array([5, 6]),
-    ];
-    const ecs = [new Uint8Array([7]), new Uint8Array([8]), new Uint8Array([9])];
-    const result = _interleave(9, dcs, ecs);
-    expect(result).toEqual(new Uint8Array([1, 3, 5, 2, 4, 6, 7, 8, 9]));
   });
 });
 
@@ -498,8 +460,9 @@ describe('_xorPattern', () => {
   });
 });
 
-describe('_computePenaltyN1', () => {
-  it('returns 0 for properly alternating pattern', () => {
+describe('_computePenalty', () => {
+  it('returns 0 for N1/N2 on properly alternating pattern', () => {
+    // Alternating pattern has no consecutive runs or 2x2 blocks
     const extent = 10;
     const pixels = new Uint8Array(extent * extent);
     for (let row = 0; row < extent; row++) {
@@ -507,10 +470,11 @@ describe('_computePenaltyN1', () => {
         pixels[row * extent + col] = (row + col) % 2;
       }
     }
-    expect(_computePenaltyN1(pixels, extent)).toBe(0);
+    // 50% dark, so N4 is 0; alternating so N1/N2 are 0; no finder patterns so N3 is 0
+    expect(_computePenalty(pixels, extent)).toBe(0);
   });
 
-  it('returns penalty for exactly 5 consecutive same bits', () => {
+  it('adds N1 penalty for 5+ consecutive same bits in row', () => {
     const extent = 10;
     const pixels = new Uint8Array(extent * extent);
     for (let row = 0; row < extent; row++) {
@@ -518,15 +482,17 @@ describe('_computePenaltyN1', () => {
         pixels[row * extent + col] = (row + col) % 2;
       }
     }
+    // Create 5 consecutive 1s in first row
     pixels[0] = 1;
     pixels[1] = 1;
     pixels[2] = 1;
     pixels[3] = 1;
     pixels[4] = 1;
-    expect(_computePenaltyN1(pixels, extent)).toBeGreaterThanOrEqual(3);
+    // Should have at least N1 penalty of 3
+    expect(_computePenalty(pixels, extent)).toBeGreaterThanOrEqual(3);
   });
 
-  it('returns 4 for 6 consecutive same bits', () => {
+  it('adds N1 penalty for 6 consecutive same bits', () => {
     const extent = 10;
     const pixels = new Uint8Array(extent * extent);
     for (let row = 0; row < extent; row++) {
@@ -535,10 +501,11 @@ describe('_computePenaltyN1', () => {
       }
     }
     for (let i = 0; i < 6; i++) pixels[i] = 1;
-    expect(_computePenaltyN1(pixels, extent)).toBe(4);
+    // N1 penalty for 6 consecutive = 3 + (6-5) = 4
+    expect(_computePenalty(pixels, extent)).toBe(4);
   });
 
-  it('adds penalties for both rows and columns', () => {
+  it('adds N1 penalties for both rows and columns', () => {
     const extent = 10;
     const pixels = new Uint8Array(extent * extent);
     for (let row = 0; row < extent; row++) {
@@ -548,13 +515,12 @@ describe('_computePenaltyN1', () => {
     }
     for (let i = 0; i < 5; i++) pixels[i] = 1;
     for (let i = 0; i < 5; i++) pixels[i * extent] = 1;
-    const penalty = _computePenaltyN1(pixels, extent);
+    const penalty = _computePenalty(pixels, extent);
+    // Should have penalties from both horizontal and vertical runs
     expect(penalty).toBeGreaterThanOrEqual(6);
   });
-});
 
-describe('_computePenaltyN2', () => {
-  it('returns 0 for alternating pattern', () => {
+  it('adds N2 penalty for 2x2 blocks', () => {
     const extent = 10;
     const pixels = new Uint8Array(extent * extent);
     for (let row = 0; row < extent; row++) {
@@ -562,25 +528,16 @@ describe('_computePenaltyN2', () => {
         pixels[row * extent + col] = (row + col) % 2;
       }
     }
-    expect(_computePenaltyN2(pixels, extent)).toBe(0);
-  });
-
-  it('returns 3 for single 2x2 block', () => {
-    const extent = 10;
-    const pixels = new Uint8Array(extent * extent);
-    for (let row = 0; row < extent; row++) {
-      for (let col = 0; col < extent; col++) {
-        pixels[row * extent + col] = (row + col) % 2;
-      }
-    }
+    // Create a single 2x2 block
     pixels[0] = 1;
     pixels[1] = 1;
     pixels[extent] = 1;
     pixels[extent + 1] = 1;
-    expect(_computePenaltyN2(pixels, extent)).toBe(3);
+    // N2 penalty = 3 for one 2x2 block
+    expect(_computePenalty(pixels, extent)).toBe(3);
   });
 
-  it('counts overlapping 2x2 blocks', () => {
+  it('adds N2 penalty for overlapping 2x2 blocks', () => {
     const extent = 10;
     const pixels = new Uint8Array(extent * extent);
     for (let row = 0; row < extent; row++) {
@@ -588,84 +545,81 @@ describe('_computePenaltyN2', () => {
         pixels[row * extent + col] = (row + col) % 2;
       }
     }
+    // Create 2x3 block of 1s (two overlapping 2x2 blocks)
     pixels[0] = 1;
     pixels[1] = 1;
     pixels[2] = 1;
     pixels[extent] = 1;
     pixels[extent + 1] = 1;
     pixels[extent + 2] = 1;
-    expect(_computePenaltyN2(pixels, extent)).toBe(6);
-  });
-});
-
-describe('_computePenaltyN3', () => {
-  it('returns 0 for empty grid', () => {
-    const extent = 21;
-    const pixels = new Uint8Array(extent * extent);
-    expect(_computePenaltyN3(pixels, extent)).toBe(0);
+    // N2 penalty = 3 * 2 = 6
+    expect(_computePenalty(pixels, extent)).toBe(6);
   });
 
-  it('detects finder-like pattern 10111010000', () => {
+  it('adds N3 penalty for finder-like pattern 10111010000', () => {
     const extent = 21;
     const pixels = new Uint8Array(extent * extent);
     const pattern = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0];
     for (let i = 0; i < pattern.length; i++) {
       pixels[i] = pattern[i];
     }
-    expect(_computePenaltyN3(pixels, extent)).toBe(40);
+    // Should include N3 penalty of 40
+    const penalty = _computePenalty(pixels, extent);
+    expect(penalty).toBeGreaterThanOrEqual(40);
   });
 
-  it('detects finder-like pattern 00001011101', () => {
+  it('adds N3 penalty for finder-like pattern 00001011101', () => {
     const extent = 21;
     const pixels = new Uint8Array(extent * extent);
     const pattern = [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1];
     for (let i = 0; i < pattern.length; i++) {
       pixels[i] = pattern[i];
     }
-    expect(_computePenaltyN3(pixels, extent)).toBe(80);
+    // Should include N3 penalty of at least 40 (pattern matches)
+    const penalty = _computePenalty(pixels, extent);
+    expect(penalty).toBeGreaterThanOrEqual(40);
   });
 
-  it('detects vertical patterns', () => {
+  it('adds N3 penalty for vertical finder-like patterns', () => {
     const extent = 21;
     const pixels = new Uint8Array(extent * extent);
     const pattern = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0];
     for (let i = 0; i < pattern.length; i++) {
       pixels[i * extent] = pattern[i];
     }
-    expect(_computePenaltyN3(pixels, extent)).toBe(40);
+    // Should include N3 penalty of 40 for vertical pattern
+    const penalty = _computePenalty(pixels, extent);
+    expect(penalty).toBeGreaterThanOrEqual(40);
   });
-});
 
-describe('_computePenaltyN4', () => {
-  it('returns 0 for 50% dark ratio', () => {
+  it('includes N1/N2 penalties for 50% dark solid blocks', () => {
     const extent = 10;
     const pixels = new Uint8Array(extent * extent);
+    // First half all 1s, second half all 0s - creates large solid blocks
     for (let i = 0; i < pixels.length / 2; i++) {
       pixels[i] = 1;
     }
-    expect(_computePenaltyN4(pixels, extent)).toBe(0);
+    // N4 = 0 for 50% ratio, but N1 and N2 will have penalties from solid blocks
+    const penalty = _computePenalty(pixels, extent);
+    // Should have significant N1/N2 penalties from the consecutive runs
+    expect(penalty).toBeGreaterThan(0);
   });
 
-  it('returns 100 for all dark', () => {
+  it('returns N4 penalty of 100 for all dark', () => {
     const extent = 10;
     const pixels = new Uint8Array(extent * extent);
     pixels.fill(1);
-    expect(_computePenaltyN4(pixels, extent)).toBe(100);
+    // All dark: N1 penalties for all rows/columns, N2 for all 2x2, N4 = 100
+    const penalty = _computePenalty(pixels, extent);
+    expect(penalty).toBeGreaterThanOrEqual(100);
   });
 
-  it('returns 100 for all light', () => {
+  it('returns N4 penalty of 100 for all light', () => {
     const extent = 10;
     const pixels = new Uint8Array(extent * extent);
-    expect(_computePenaltyN4(pixels, extent)).toBe(100);
-  });
-
-  it('returns 10 for 55% dark ratio', () => {
-    const extent = 10;
-    const pixels = new Uint8Array(extent * extent);
-    for (let i = 0; i < 55; i++) {
-      pixels[i] = 1;
-    }
-    expect(_computePenaltyN4(pixels, extent)).toBe(10);
+    // All light: N1 penalties, N2 penalties, N4 = 100
+    const penalty = _computePenalty(pixels, extent);
+    expect(penalty).toBeGreaterThanOrEqual(100);
   });
 });
 

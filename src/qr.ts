@@ -76,37 +76,6 @@ const getBestVersion = (data: Uint8Array, ec: ECLevel): number => {
   throw new RangeError('Bytes exceed max length');
 };
 
-/** Interleaves data from DC blocks then data from EC blocks */
-const interleave = (
-  byteLength: number,
-  dcs: Uint8Array[],
-  ecs: Uint8Array[]
-): Uint8Array => {
-  //let byteLength = 0;
-  let maxY = 0;
-  // Get the maximum of length of DC blocks and add up byte length
-  for (let i = 0; i < dcs.length; i++) {
-    maxY = maxY < dcs[i].byteLength ? dcs[i].byteLength : maxY;
-  }
-  // Add bytes from DCs, alternating blocks each time
-  const buffer = new Uint8Array(byteLength);
-  let idx = 0;
-  for (let y = 0; y < maxY; y++) {
-    for (let x = 0; x < dcs.length; x++) {
-      if (y < dcs[x].byteLength) {
-        buffer[idx++] = dcs[x][y];
-      }
-    }
-  }
-  // Add bytes from ECs, alternating blocks each time
-  for (let y = 0, maxY = ecs[0].byteLength; y < maxY; y++) {
-    for (let x = 0; x < ecs.length; x++) {
-      buffer[idx++] = ecs[x][y];
-    }
-  }
-  return buffer;
-};
-
 /** Encode segments output data into interleaved QR data with EC */
 const encodeData = (segments: Uint8Array, version: number, ec: ECLevel) => {
   const byteLength = segments.byteLength + ecSizeByVersion[version][ec];
@@ -114,30 +83,40 @@ const encodeData = (segments: Uint8Array, version: number, ec: ECLevel) => {
   const splitIdx = numBlocks - (byteLength % numBlocks);
   const blockLength = (segments.byteLength / numBlocks) | 0;
   const ecCount = ((byteLength / numBlocks) | 0) - blockLength;
-  // We assemble EC blocks for each DC block
-  const dcs: Uint8Array[] = new Array(numBlocks);
-  const ecs: Uint8Array[] = new Array(numBlocks);
-  for (let idx = 0, offset = 0; idx < numBlocks; idx++) {
-    const dataSize = idx < splitIdx ? blockLength : blockLength + 1;
-    const dc = (dcs[idx] = segments.subarray(offset, (offset += dataSize)));
-    ecs[idx] = encodeRS(dc, ecCount);
+  const ecStart = segments.byteLength;
+  // Interleave bytes of all data blocks
+  const data = new Uint8Array(byteLength);
+  for (let blockIdx = 0, ptr = 0; blockIdx < numBlocks; blockIdx++) {
+    const dataSize = blockIdx < splitIdx ? blockLength : blockLength + 1;
+    const ecBytes = encodeRS(segments.subarray(ptr, ptr + dataSize), ecCount);
+    // Interleave bytes from each DC block
+    for (let byteIdx = 0; byteIdx < dataSize; byteIdx++) {
+      const bufIdx =
+        byteIdx < blockLength
+          ? byteIdx * numBlocks + blockIdx
+          : blockLength * numBlocks + (blockIdx - splitIdx);
+      data[bufIdx] = segments[ptr + byteIdx];
+    }
+    // Then; interleave bytes from each computed EC block
+    for (let byteIdx = 0; byteIdx < ecCount; byteIdx++) {
+      data[ecStart + byteIdx * numBlocks + blockIdx] = ecBytes[byteIdx];
+    }
+    ptr += dataSize;
   }
-  // Interleave the DCs and then the ECs
-  return interleave(byteLength, dcs, ecs);
+  return data;
 };
 
 /** Draw plain square */
 const setSquare = (
   pixels: Uint8Array,
   extent: number,
-  row: number,
-  col: number,
+  fromRow: number,
+  fromCol: number,
   size: number
 ) => {
-  for (let i = 0; i < size; i++) {
-    for (let j = 0; j < size; j++) {
-      pixels[(row + i) * extent + (col + j)] = 1;
-    }
+  const end = (fromRow + size) * extent;
+  for (let offset = fromRow * extent; offset < end; offset += extent) {
+    pixels.fill(1, offset + fromCol, offset + fromCol + size);
   }
 };
 
@@ -289,123 +268,203 @@ const writeData = (
   }
 };
 
+const xorPatternN0 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      if (!reserved[idx] && ((row + col) & 1) === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN1 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      if (!reserved[idx] && (row & 1) === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN2 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      if (!reserved[idx] && col % 3 === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN3 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      if (!reserved[idx] && (row + col) % 3 === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN4 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    const rowHalf = (row / 2) | 0;
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      if (!reserved[idx] && ((rowHalf + ((col / 3) | 0)) & 1) === 0)
+        pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN5 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      const rc = row * col;
+      if (!reserved[idx] && (rc & 1) + (rc % 3) === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN6 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      const rc = row * col;
+      if (!reserved[idx] && ((rc & 1) + (rc % 3)) % 2 === 0) pixels[idx] ^= 1;
+    }
+  }
+};
+
+const xorPatternN7 = (
+  pixels: Uint8Array,
+  reserved: Uint8Array,
+  extent: number
+): void => {
+  for (let row = 0, rowBase = 0; row < extent; row++, rowBase += extent) {
+    for (let col = 0; col < extent; col++) {
+      const idx = rowBase + col;
+      const rc = row * col;
+      if (!reserved[idx] && (((rc % 3) + ((row + col) & 1)) & 1) === 0)
+        pixels[idx] ^= 1;
+    }
+  }
+};
+
 /** XOR the mask pattern onto the pixels on unreserved bits */
 const xorPattern = (
   pixels: Uint8Array,
   reserved: Uint8Array,
   extent: number,
   pattern: MaskPattern
-) => {
-  for (let row = 0; row < extent; row++) {
-    for (let col = 0; col < extent; col++) {
-      if (!reserved[row * extent + col]) {
-        let bit: boolean;
-        switch (pattern) {
-          case 0:
-            bit = (row + col) % 2 === 0;
-            break;
-          case 1:
-            bit = row % 2 === 0;
-            break;
-          case 2:
-            bit = col % 3 === 0;
-            break;
-          case 3:
-            bit = (row + col) % 3 === 0;
-            break;
-          case 4:
-            bit = (((row / 2) | 0) + ((col / 3) | 0)) % 2 === 0;
-            break;
-          case 5:
-            bit = ((row * col) % 2) + ((row * col) % 3) === 0;
-            break;
-          case 6:
-            bit = (((row * col) % 2) + ((row * col) % 3)) % 2 === 0;
-            break;
-          case 7:
-            bit = (((row * col) % 3) + ((row + col) % 2)) % 2 === 0;
-            break;
-        }
-        pixels[row * extent + col] ^= bit ? 1 : 0;
-      }
-    }
+): void => {
+  switch (pattern) {
+    case 0:
+      return xorPatternN0(pixels, reserved, extent);
+    case 1:
+      return xorPatternN1(pixels, reserved, extent);
+    case 2:
+      return xorPatternN2(pixels, reserved, extent);
+    case 3:
+      return xorPatternN3(pixels, reserved, extent);
+    case 4:
+      return xorPatternN4(pixels, reserved, extent);
+    case 5:
+      return xorPatternN5(pixels, reserved, extent);
+    case 6:
+      return xorPatternN6(pixels, reserved, extent);
+    case 7:
+      return xorPatternN7(pixels, reserved, extent);
   }
 };
 
-/** Penalty for 5 adjacent consecutive bits */
-const computePenaltyN1 = (pixels: Uint8Array, extent: number): number => {
-  const PENALTY_WEIGHT_N1 = 3;
+/** Compute all penalty scores in a single pass */
+const computePenalty = (pixels: Uint8Array, extent: number): number => {
+  const PENALTY_N1 = 3; // N1: Penalises consecutive bits
+  const PENALTY_N2 = 3; // N2: Penalises 2x2 squares
+  const PENALTY_N3 = 40; // N3: Penalises finder patterns
+  const PENALTY_N4 = 10; // N4: Penalises high ratio of dark blotches
   let penalty = 0;
-  for (let row = 0; row < extent; row++) {
-    let rowNumSame = 1;
-    let colNumSame = 1;
-    for (let col = 1; col < extent; col++) {
-      if (pixels[row * extent + col - 1] === pixels[row * extent + col]) {
-        rowNumSame++;
-      } else {
-        if (rowNumSame >= 5) penalty += PENALTY_WEIGHT_N1 + (rowNumSame - 5);
-        rowNumSame = 1;
-      }
-      if (pixels[(col - 1) * extent + row] === pixels[col * extent + row]) {
-        colNumSame++;
-      } else {
-        if (colNumSame >= 5) penalty += PENALTY_WEIGHT_N1 + (colNumSame - 5);
-        colNumSame = 1;
-      }
-    }
-    if (rowNumSame >= 5) penalty += PENALTY_WEIGHT_N1 + (rowNumSame - 5);
-    if (colNumSame >= 5) penalty += PENALTY_WEIGHT_N1 + (colNumSame - 5);
-  }
-  return penalty;
-};
-
-/** Penalty for amount of 2x2 squares */
-const computePenaltyN2 = (pixels: Uint8Array, extent: number): number => {
-  const PENALTY_WEIGHT_N2 = 3;
-  let penalty = 0;
-  for (let row = 0; row < extent - 1; row++) {
-    for (let col = 0; col < extent - 1; col++) {
-      if (
-        pixels[row * extent + col] === pixels[row * extent + col + 1] &&
-        pixels[row * extent + col] === pixels[(row + 1) * extent + col] &&
-        pixels[row * extent + col] === pixels[(row + 1) * extent + col + 1]
-      ) {
-        penalty += PENALTY_WEIGHT_N2;
-      }
-    }
-  }
-  return penalty;
-};
-
-/** Penalty for finder-like patterns (0b000010001 / 0b100010000) */
-const computePenaltyN3 = (pixels: Uint8Array, extent: number): number => {
-  const PENALTY_WEIGHT_N3 = 40;
-  let penalty = 0;
-  for (let i = 0; i < extent; i++) {
-    let row = 0;
-    let col = 0;
-    for (let j = 0; j < extent; j++) {
-      row = ((row << 1) & 0x7ff) | pixels[i * extent + j];
-      if (j >= 10 && (row === 0x5d0 || row === 0x05d))
-        penalty += PENALTY_WEIGHT_N3;
-      col = ((col << 1) & 0x7ff) | pixels[j * extent + i];
-      if (j >= 10 && (col === 0x5d0 || col === 0x05d))
-        penalty += PENALTY_WEIGHT_N3;
-    }
-  }
-  return penalty;
-};
-
-/** Penalty if ratio of unset bits is too high */
-const computePenaltyN4 = (pixels: Uint8Array, extent: number): number => {
-  const PENALTY_WEIGHT_N4 = 10;
   let darkBits = 0;
-  for (let row = 0; row < extent; row++)
-    for (let col = 0; col < extent; col++)
-      darkBits += pixels[row * extent + col] & 1;
+  for (let i = 0; i < extent; i++) {
+    let rowNumSame = 1; // N1: consecutive rows
+    let colNumSame = 1; // N1: consecutive cols
+    let rowWindow = 0; // N3: sliding window for row finder patterns
+    let colWindow = 0; // N3: sliding window for col finder patterns
+    for (let j = 0; j < extent; j++) {
+      const rowIdx = i * extent + j; // row pixel at (i, j)
+      const colIdx = j * extent + i; // row pixel at (j, i)
+      darkBits += pixels[rowIdx];
+      // N1: After first pixels, keep track of consecutive pixels
+      if (j > 0) {
+        // N1: Check row for consecutive pixels
+        if (pixels[rowIdx - 1] === pixels[rowIdx]) {
+          rowNumSame++;
+        } else {
+          if (rowNumSame >= 5) penalty += PENALTY_N1 + (rowNumSame - 5);
+          rowNumSame = 1;
+        }
+        // N1: Check column for consecutive pixels
+        if (pixels[colIdx - extent] === pixels[colIdx]) {
+          colNumSame++;
+        } else {
+          if (colNumSame >= 5) penalty += PENALTY_N1 + (colNumSame - 5);
+          colNumSame = 1;
+        }
+      }
+      // N2: check for 2x2 square
+      if (
+        i < extent - 1 &&
+        j < extent - 1 &&
+        pixels[rowIdx] === pixels[rowIdx + 1] &&
+        pixels[rowIdx] === pixels[rowIdx + extent] &&
+        pixels[rowIdx] === pixels[rowIdx + extent + 1]
+      )
+        penalty += PENALTY_N2;
+      // N3: update sliding windows, and check for finder patterns
+      rowWindow = ((rowWindow << 1) & 0x7ff) | pixels[rowIdx];
+      colWindow = ((colWindow << 1) & 0x7ff) | pixels[colIdx];
+      if (j >= 10) {
+        if (rowWindow === 0x5d0 || rowWindow === 0x05d) penalty += PENALTY_N3;
+        if (colWindow === 0x5d0 || colWindow === 0x05d) penalty += PENALTY_N3;
+      }
+    }
+    // N1: At the end of row/column run, check for consecutive pixels again
+    if (rowNumSame >= 5) penalty += PENALTY_N1 + (rowNumSame - 5);
+    if (colNumSame >= 5) penalty += PENALTY_N1 + (colNumSame - 5);
+  }
+  // N4: after counting all dark bits, compute penalty from dark/light ratio
   const fraction = darkBits / pixels.byteLength;
   const increment = Math.abs(fraction - 0.5) * 100;
-  return PENALTY_WEIGHT_N4 * Math.floor(increment / 5);
+  penalty += PENALTY_N4 * Math.floor(increment / 5);
+  return penalty;
 };
 
 const applyBestPattern = (
@@ -415,26 +474,24 @@ const applyBestPattern = (
 ): MaskPattern => {
   let minPenalty = 0;
   let bestPattern: MaskPattern = 0;
+  // Apply the patterns to a copy that's reset each time
+  // NOTE: This is more performant than undoing the XOR
+  const copy = new Uint8Array(pixels.byteLength);
   for (
     let pattern: MaskPattern = 0;
     pattern <= 7;
     pattern = (pattern + 1) as MaskPattern
   ) {
-    xorPattern(pixels, reserved, extent, pattern);
-    const penalty =
-      computePenaltyN1(pixels, extent) +
-      computePenaltyN2(pixels, extent) +
-      computePenaltyN3(pixels, extent) +
-      computePenaltyN4(pixels, extent);
+    copy.set(pixels);
+    xorPattern(copy, reserved, extent, pattern);
+    // Pick the pattern with the lowest penalty
+    const penalty = computePenalty(copy, extent);
     if (pattern === 0 || penalty < minPenalty) {
       minPenalty = penalty;
       bestPattern = pattern;
     }
-    // Micro-opt: We can skip a triple-XOR if the final pattern is the best
-    if (pattern === 7 && bestPattern === 7) return 7;
-    // Undo the pattern by applying XOR again
-    xorPattern(pixels, reserved, extent, pattern);
   }
+  // Apply the best pattern to the actual pixel buffer
   xorPattern(pixels, reserved, extent, bestPattern);
   return bestPattern;
 };
@@ -542,7 +599,6 @@ export const toQR = (content: string | Uint8Array, ec = ECLevel.L) => {
 export {
   makeSegments as _makeSegments,
   getBestVersion as _getBestVersion,
-  interleave as _interleave,
   encodeData as _encodeData,
   writeFinderPatterns as _writeFinderPatterns,
   writeAlignmentPatterns as _writeAlignmentPatterns,
@@ -551,10 +607,7 @@ export {
   reserveVersionInfo as _reserveVersionInfo,
   writeData as _writeData,
   xorPattern as _xorPattern,
-  computePenaltyN1 as _computePenaltyN1,
-  computePenaltyN2 as _computePenaltyN2,
-  computePenaltyN3 as _computePenaltyN3,
-  computePenaltyN4 as _computePenaltyN4,
+  computePenalty as _computePenalty,
   applyBestPattern as _applyBestPattern,
   encodeFormatInfo as _encodeFormatInfo,
   writeFormatInfo as _writeFormatInfo,
