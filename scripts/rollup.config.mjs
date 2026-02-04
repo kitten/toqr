@@ -201,6 +201,7 @@ const outputPlugins = [
       conditionals: false,
       join_vars: false,
       reduce_vars: true,
+      reduce_funcs: false,
     },
     mangle: {
       module: true,
